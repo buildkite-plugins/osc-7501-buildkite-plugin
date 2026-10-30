@@ -42,4 +42,3 @@ bash -n hooks/post-command
 python3 -I lib/report.py local tests/fixtures/failed.raw /tmp/osc7501-demo --include-details
 ```
 
-Local mode writes `annotation.html` and `events.v1.json` without uploads or annotation writes. Use synthetic or already-redacted inputs. Local previews do not verify Buildkite sanitization or artifact links.
