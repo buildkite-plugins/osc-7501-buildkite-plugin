@@ -1,0 +1,7 @@
+#!/bin/bash
+# Optional reporting must not change the command's outcome or disclose diagnostics.
+set +x
+if ! python3 -I "$(dirname "${BASH_SOURCE[0]}")/../lib/report.py" hook 2>/dev/null; then
+  printf '%s\n' 'OSC 7501 report warning: reporting could not finish; command outcome unchanged' >&2
+fi
+exit 0

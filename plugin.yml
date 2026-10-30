@@ -1,0 +1,14 @@
+name: OSC 7501
+description: Partial program-event HTML and JSON artifacts from the agent's local log file
+author: https://github.com/mcncl
+requirements:
+  - bash
+  - python3
+  - buildkite-agent
+configuration:
+  properties:
+    include-details:
+      type: boolean
+      default: false
+      description: Copy adjacent matching already-redacted readable program descriptions
+  additionalProperties: false

@@ -1,0 +1,18 @@
+[90m$[0m cd /tmp/osc-tree-capture/builds/demo-agent/demo/demo
+]7501;state=working:id=hook/agent/pre-command:app=buildkite-agent:msg=UnVubmluZyBhZ2VudCBwcmUtY29tbWFuZCBob29r\~~~ Running agent pre-command hook
+[90m$[0m /tmp/osc-tree-capture/hooks/pre-command
+Preparing synthetic environment
+]7501;state=done:id=hook/agent/pre-command:app=buildkite-agent\]7501;state=working:id=command:app=buildkite-agent:msg=UnVubmluZyB0aGUgY29tbWFuZA==\~~~ Running commands
+[90m$[0m bash /tmp/osc-tree-capture/job.sh successful
+Building synthetic package
+]7501;state=working:id=build:app=demo-build:progress=40:msg=Q29tcGlsaW5n\[90m# Program status: state=working id=build progress=40 app=demo-build msg="Compiling"[0m
+Compiled module A
+]7501;state=working:id=build:app=demo-build:progress=60:msg=Q29tcGlsaW5n\Compiled module B
+]7501;state=working:id=build/test:app=demo-build:msg=UnVubmluZyBzeW50aGV0aWMgdGVzdHM=\[90m# Program status: state=working id=build/test app=demo-build msg="Running synthetic tests"[0m
+PASS TestSyntheticTotal
+]7501;state=done:id=build/test:app=demo-build:msg=VGVzdHMgcGFzc2Vk\[90m# Program status: state=done id=build/test app=demo-build msg="Tests passed"[0m
+]7501;state=done:id=build:app=demo-build:msg=QnVpbGQgY29tcGxldGU=\[90m# Program status: state=done id=build app=demo-build msg="Build complete"[0m
+]7501;state=done:id=command:app=buildkite-agent\]7501;state=working:id=hook/agent/post-command:app=buildkite-agent:msg=UnVubmluZyBhZ2VudCBwb3N0LWNvbW1hbmQgaG9vaw==\~~~ Running agent post-command hook
+[90m$[0m /tmp/osc-tree-capture/hooks/post-command
+Collecting synthetic test summary
+]7501;state=done:id=hook/agent/post-command:app=buildkite-agent\]7501;state=clear:id=hook/agent/pre-command:app=buildkite-agent\]7501;state=clear:id=hook/agent/post-command:app=buildkite-agent\

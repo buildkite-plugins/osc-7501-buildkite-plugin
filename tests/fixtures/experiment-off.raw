@@ -1,0 +1,13 @@
+[90m$[0m cd /tmp/osc-tree-capture/builds/demo-agent/demo/demo
+~~~ Running agent pre-command hook
+[90m$[0m /tmp/osc-tree-capture/hooks/pre-command
+Preparing synthetic environment
+~~~ Running commands
+[90m$[0m bash /tmp/osc-tree-capture/job.sh experiment-off
+Building synthetic package
+Compiled module A
+Compiled module B
+PASS TestSyntheticTotal
+~~~ Running agent post-command hook
+[90m$[0m /tmp/osc-tree-capture/hooks/post-command
+Collecting synthetic test summary
