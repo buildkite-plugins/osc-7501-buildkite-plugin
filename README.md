@@ -48,6 +48,8 @@ The tree groups by `/` in program IDs. Groups with visible content start expande
 
 Open the separate **Chronological history** section to see reports in snapshot order, including successful hooks, repeats, progress, and clear reports. Clear removes live records and descendants, not history. This section starts collapsed.
 
+State labels use Buildkite's supported annotation colours: error is red, done is green, blocked is orange, working is blue, and idle or cleared is muted. Text labels remain visible; groups stay neutral. Colours describe program states, not the job outcome.
+
 Annotations show at most 100 tree nodes and 200 characters of each readable description. History shows the first reports that fit within the 256 KiB annotation limit, with a notice when reports are omitted. Display limits do not shorten JSON history. Extraction is bounded to the first 2 MiB of logs and 1000 events; the JSON artifact is limited to 2 MiB.
 
 Reports are **partial**, not job status: buffered output and later hooks may be missing. Setup failures, hard cancellation, or agent loss can prevent reporting. Line numbers are snapshot-local; no timestamps, durations, or exact native log-line links are inferred.

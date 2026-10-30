@@ -142,6 +142,12 @@ def extract(data, include_details=False, limited=False):
 
 def render(report, artifact_path=None, job=None):
     escape = lambda value: html.escape(str(value), quote=True)
+
+    def state_label(state):
+        color = {"error": "red", "done": "green", "blocked": "orange", "working": "blue",
+                 "idle": "muted", "clear": "muted", "cleared": "muted"}.get(state)
+        return '<span class="' + color + '">' + escape(state) + '</span>' if color else escape(state)
+
     events = report["events"]
     source = report["source"]
     status = source["availability"] + " · partial snapshot"
@@ -180,13 +186,13 @@ def render(report, artifact_path=None, job=None):
             current = live.get(key)
             own = node["events"]
             label = current["state"] if current else ("cleared" if own else "group")
-            summary = '<code>' + escape(name) + '</code> <strong>' + label + '</strong>'
+            summary = '<code>' + escape(name) + '</code> <strong>' + state_label(label) + '</strong>'
             if own:
                 summary += ' · ' + str(len(own)) + ' reports'
                 if current is None:
                     previous = next((e for e in reversed(own) if e["state"] != "clear"), None)
                     if previous:
-                        summary += ' · last before clear: ' + previous["state"]
+                        summary += ' · last before clear: ' + state_label(previous["state"])
             if current:
                 for field in ("app", "kind", "progress"):
                     if field in current:
@@ -202,7 +208,7 @@ def render(report, artifact_path=None, job=None):
                     body += '<p>Showing the last ' + str(MAX_NODE_REPORTS) + ' of ' + str(len(own)) + ' reports for this program. See chronological history or JSON for earlier reports.</p>'
                 body += '<ol>'
                 for event in own[-MAX_NODE_REPORTS:]:
-                    body += '<li>Report #' + str(event["sequence"]) + ' · ' + escape(event["state"])
+                    body += '<li>Report #' + str(event["sequence"]) + ' · ' + state_label(event["state"])
                     if "progress" in event:
                         body += ' · progress=' + str(event["progress"])
                     body += ' · snapshot line ' + str(event["snapshot_line"]) + '</li>'
@@ -231,7 +237,7 @@ def render(report, artifact_path=None, job=None):
             extra = ' · '.join(key + '=' + str(event[key]) for key in ("app", "kind", "progress") if key in event)
             detail = event.get("details", "Details unavailable")
             row = ('<tr><td>' + str(event["sequence"]) + '</td><td><code>' + escape(event["id"] or '(root record)')
-                   + '</code></td><td>' + escape(event["state"]) + '</td><td>' + escape(extra)
+                   + '</code></td><td>' + state_label(event["state"]) + '</td><td>' + escape(extra)
                    + '<p>' + escape(detail[:200]) + ('… (shortened)' if len(detail) > 200 else '')
                    + '</p></td><td>' + str(event["snapshot_line"]) + '</td></tr>')
             size = len(row.encode())

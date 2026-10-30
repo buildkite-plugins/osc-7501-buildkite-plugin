@@ -159,8 +159,8 @@ class ReportTests(unittest.TestCase):
         result = report.extract(b"".join(osc(b) for b in bodies))
         self.assertEqual(len(result["events"]), 6)
         page = report.render(result)
-        self.assertIn('test</code> <strong>cleared</strong> · 1 reports · last before clear: done', page)
-        self.assertIn('build</code> <strong>working</strong> · 4 reports · app=new', page)
+        self.assertIn('test</code> <strong><span class="muted">cleared</span></strong> · 1 reports · last before clear: <span class="green">done</span>', page)
+        self.assertIn('build</code> <strong><span class="blue">working</span></strong> · 4 reports · app=new', page)
         self.assertIn('6 chronological reports', page)
         # command and build are sibling roots, not a fabricated parent/child pair.
         self.assertIn('</details></li><li><details open><summary><code>build</code>', page)
@@ -185,15 +185,37 @@ class ReportTests(unittest.TestCase):
         command = page.split('<code>command</code>', 1)[1].split('</details>', 1)[0]
         self.assertIn('Readable details unavailable', command)
         self.assertIn('Showing the last 5 of 6 reports', command)
-        self.assertIn('Report #3 · working · progress=20 · snapshot line 3', command)
-        self.assertIn('Report #7 · error · snapshot line 7', command)
+        self.assertIn('Report #3 · <span class="blue">working</span> · progress=20 · snapshot line 3', command)
+        self.assertIn('Report #7 · <span class="red">error</span> · snapshot line 7', command)
         self.assertEqual(command.count('<li>Report #'), 5)
         for sequence in (1, 2, 8):
             self.assertNotIn('Report #' + str(sequence) + ' ·', command)
         root = page.split('<code>(root record)</code>', 1)[1].split('</details>', 1)[0]
-        self.assertIn('Report #8 · error · snapshot line 8', root)
+        self.assertIn('Report #8 · <span class="red">error</span> · snapshot line 8', root)
         self.assertEqual(len(result['events']), 8)
         self.assertEqual([int(row[0]) for row in HistoryRows(page).rows], list(range(1, 9)))
+
+    def test_state_colours_preserve_labels_and_json(self):
+        colours = [('error', 'red'), ('done', 'green'), ('blocked', 'orange'),
+                   ('working', 'blue'), ('idle', 'muted'), ('clear', 'muted')]
+        data = b'\n'.join(osc(('state=' + state + ':id=tools/' + state).encode())
+                          for state, _ in colours)
+        result = report.extract(data)
+        original = json.dumps(result)
+        page = report.render(result)
+        tree, history = page.split('<details><summary>Chronological history', 1)
+        self.assertIn('<code>tools</code> <strong>group</strong>', tree)
+        for sequence, (state, colour) in enumerate(colours, 1):
+            with self.subTest(state=state):
+                label = '<span class="' + colour + '">' + state + '</span>'
+                self.assertIn('<li>Report #' + str(sequence) + ' · ' + label, tree)
+                self.assertIn('<td>' + label + '</td>', history)
+                latest = '<span class="muted">cleared</span>' if state == 'clear' else label
+                self.assertIn('<code>' + state + '</code> <strong>' + latest + '</strong>', tree)
+        self.assertEqual([row[2] for row in HistoryRows(page).rows], [state for state, _ in colours])
+        self.assertEqual(json.dumps(result), original)
+        self.assertNotIn('<style', page)
+        self.assertNotIn('style=', page)
 
     def test_group_with_no_visible_content_has_no_disclosure(self):
         bodies = [b'state=done:id=program' + str(i).encode() for i in range(99)]
@@ -214,7 +236,7 @@ class ReportTests(unittest.TestCase):
                 result = report.extract(error + osc(b"state=clear:" + fields))
                 self.assertEqual(len(result["events"]), 1)
                 self.assertIn("unsupported or malformed OSC report", result["source"]["limited"])
-                self.assertIn('test</code> <strong>error</strong>', report.render(result))
+                self.assertIn('test</code> <strong><span class="red">error</span></strong>', report.render(result))
 
     def test_serialized_json_size_bound(self):
         payload = osc(b"state=working:id=x") + b'# Program status: state=working id=x msg="' + b"\xc3\xa9" * 900 + b'"\n'
