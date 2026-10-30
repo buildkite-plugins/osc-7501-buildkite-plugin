@@ -17,6 +17,8 @@ MAX_SEQUENCE = 4096
 MAX_FIELDS = 24
 MAX_EVENTS = 1000
 MAX_ARTIFACT = 2 * 1024 * 1024
+MAX_TREE_NODES = 100
+MAX_ANNOTATION = 256 * 1024
 STATES = {"idle", "working", "blocked", "done", "error", "clear"}
 SEGMENT = re.compile(r"[A-Za-z0-9_.+-]{1,32}\Z")
 SGR = re.compile(rb"\x1b\[[0-9;]*m")
@@ -137,7 +139,7 @@ def extract(data, include_details=False, limited=False):
     return report
 
 
-def render(report):
+def render(report, artifact_path=None, job=None):
     escape = lambda value: html.escape(str(value), quote=True)
     events = report["events"]
     source = report["source"]
@@ -161,49 +163,88 @@ def render(report):
             branch = branch["children"]
         node["events"].append(event)
 
+    shown = 0
+    omitted = False
+
     def tree(branch, path=""):
+        nonlocal shown, omitted
         result = "<ul>"
         for name, node in branch.items():
+            if shown == MAX_TREE_NODES:
+                omitted = True
+                break
+            shown += 1
             identifier = (path + "/" + name).lstrip("/")
             key = "" if identifier == "(root record)" else identifier
             current = live.get(key)
             own = node["events"]
             label = current["state"] if current else ("cleared" if own else "group")
-            result += '<li><details open><summary><code>' + escape(name) + '</code> <span class="state ' + label + '">' + label + '</span>'
+            result += '<li><details open><summary><code>' + escape(name) + '</code> <strong>' + label + '</strong>'
             if own:
-                result += ' <a href="#event-' + str(own[-1]["sequence"]) + '">' + str(len(own)) + ' reports</a>'
-            result += "</summary>"
-            if own:
-                result += '<p class="record">' + escape(identifier) + "</p>"
+                result += ' · ' + str(len(own)) + ' reports'
+                if current is None:
+                    previous = next((e for e in reversed(own) if e["state"] != "clear"), None)
+                    if previous:
+                        result += ' · last before clear: ' + previous["state"]
+            if current:
+                for field in ("app", "kind", "progress"):
+                    if field in current:
+                        result += ' · ' + field + '=' + escape(current[field])
+            result += '</summary>'
+            if current and current.get("details"):
+                detail = current["details"]
+                result += '<p>' + escape(detail[:200]) + ('… (shortened)' if len(detail) > 200 else '') + '</p>'
             if node["children"]:
                 result += tree(node["children"], identifier)
             result += "</details></li>"
         return result + "</ul>"
 
-    rows = []
-    for event in events:
-        extra = " · ".join(k + "=" + str(event[k]) for k in ("app", "kind", "progress") if k in event)
-        rows.append('<tr id="event-' + str(event["sequence"]) + '"><td>' + str(event["sequence"]) + '</td><td><code>' + escape(event["id"] or "(root record)") + '</code></td><td><span class="state ' + event["state"] + '">' + event["state"] + '</span></td><td>' + escape(extra) + '<div class="detail">' + escape(event.get("details", "Details unavailable")) + '</div></td><td>' + str(event["snapshot_line"]) + '</td></tr>')
     if not events:
         message = "Log snapshot unavailable. No event history can be determined." if source["availability"] == "unavailable" else "No supported events observed. Experiment support is unknown; this is not evidence of success."
-        content = '<p class="notice">' + message + '</p>'
+        content = '<p>' + message + '</p>'
     else:
-        content = '<section><h2>Event tree <small>Grouped by program ID</small></h2>' + tree(nodes) + '</section><section><h2>Chronological reports <small>' + str(len(events)) + ' reports</small></h2><div class="scroll"><table><thead><tr><th>#</th><th>Program ID</th><th>State</th><th>Details</th><th>Snapshot line</th></tr></thead><tbody>' + ''.join(rows) + '</tbody></table></div></section>'
-    return '''<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
-<title>OSC 7501 event snapshot</title><style>
-table{min-width:720px}
-:root{color-scheme:light}*{box-sizing:border-box}body{margin:0;background:#f5f7fa;color:#192635;font:15px/1.5 system-ui,sans-serif}main{max-width:1200px;margin:auto;padding:36px 24px}h1{margin:0;font-size:30px}h2{font-size:20px;margin:0 0 18px}small{font-size:13px;color:#536476;font-weight:400;margin-left:10px}header{margin-bottom:26px}.notice{background:#fff4d9;border-left:4px solid #aa7000;padding:14px 18px}.scope{color:#536476;max-width:1000px}section{background:white;border:1px solid #d8e0e8;border-radius:8px;padding:22px;margin:20px 0}ul{list-style:none;margin:4px 0;padding-left:24px}section>ul{padding-left:0}li{border-left:1px solid #d8e0e8;padding-left:14px}summary{cursor:pointer;padding:7px;border-radius:4px;overflow-wrap:anywhere}summary:hover,summary:focus-visible{background:#edf3fc}.record{color:#536476;font-size:12px;margin:0 0 8px 24px}a{color:#265bae;font-size:12px}a:hover{text-decoration-thickness:2px}.state{display:inline-block;font-size:12px;border-radius:4px;padding:2px 7px;background:#e9eef4;color:#3e5065;margin-left:5px}.working{background:#e5edff;color:#204ea0}.done{background:#def4e8;color:#14633c}.error{background:#ffe3e1;color:#962d28}.blocked{background:#fff0c7;color:#795500}table{width:100%;border-collapse:collapse;text-align:left;font-size:13px}th{font-weight:600;color:#536476;background:#f5f7fa}td,th{padding:12px 10px;border-bottom:1px solid #e3e8ef;vertical-align:top}td{overflow-wrap:anywhere}tr:target{background:#fff4d9}.detail{white-space:pre-wrap;color:#536476;margin-top:5px;max-width:480px}.scroll{overflow:auto}code{font-size:13px}footer{color:#536476;font-size:12px}@media(max-width:600px){main{padding:20px 12px}section{padding:14px}h1{font-size:25px}small{display:block;margin:4px 0}ul{padding-left:12px}}
-</style></head><body><main><header><h1>OSC-7501 Events</h1><p class="notice">''' + escape(status) + '''</p><p class="scope">Buffered output and later lifecycle reports may be missing. Program states are not job status.</p></header>''' + content + '''<footer>Cleared records remain in history. Line numbers refer to this snapshot, not the Buildkite log viewer.</footer></main></body></html>'''
+        content = '<p>' + str(len(events)) + ' chronological reports · grouped by program ID</p>' + tree(nodes)
+        if omitted:
+            content += '<p>Tree limited to ' + str(MAX_TREE_NODES) + ' nodes. Other programs are omitted from this summary.</p>'
+        rows = []
+        # Reserve space for the fixed header, history wrapper, notices and links.
+        remaining = MAX_ANNOTATION - len(content.encode()) - 4096
+        for event in events:
+            extra = ' · '.join(key + '=' + str(event[key]) for key in ("app", "kind", "progress") if key in event)
+            detail = event.get("details", "Details unavailable")
+            row = ('<tr><td>' + str(event["sequence"]) + '</td><td><code>' + escape(event["id"] or '(root record)')
+                   + '</code></td><td>' + escape(event["state"]) + '</td><td>' + escape(extra)
+                   + '<p>' + escape(detail[:200]) + ('… (shortened)' if len(detail) > 200 else '')
+                   + '</p></td><td>' + str(event["snapshot_line"]) + '</td></tr>')
+            size = len(row.encode())
+            if size > remaining:
+                break
+            remaining -= size
+            rows.append(row)
+        if len(rows) < len(events):
+            content += '<p>History limited to the first ' + str(len(rows)) + ' of ' + str(len(events)) + ' reports. JSON retains the remaining extracted reports.</p>'
+        content += ('<details><summary>Chronological history (' + str(len(rows)) + ' of ' + str(len(events))
+                    + ' reports)</summary><div class="overflow-auto"><table><thead><tr><th>#</th><th>Program ID</th>'
+                    '<th>State</th><th>Details</th><th>Snapshot line</th></tr></thead><tbody>'
+                    + ''.join(rows) + '</tbody></table></div></details>')
+    link = ('<a href="artifact://' + escape(artifact_path) + '">Download chronological JSON</a>'
+            if artifact_path else 'JSON artifact not uploaded.')
+    if job:
+        link += ' · <a href="?jid=' + escape(job) + '&amp;tab=output#' + escape(job) + '">Open job log</a>'
+    body = ('<h3>OSC-7501 Events</h3><p><strong>' + escape(status) + '</strong></p>'
+            '<p>Buffered output and later lifecycle reports may be missing. Program states are not job status.</p>'
+            + content + '<p>' + link + '</p>'
+            '<p>Cleared records remain in JSON history. Line numbers are snapshot-local, not Buildkite log viewer IDs.</p>')
+    if len(body.encode()) > MAX_ANNOTATION:
+        raise ValueError("annotation exceeds limit")
+    return body
 
 
 def write_report(report, directory):
-    # Both serialized artifacts are independently bounded, including HTML expansion.
+    # Annotation display limits must not discard chronological JSON events.
     while True:
         encoded = json.dumps(report, ensure_ascii=True, separators=(",", ":")).encode()
-        page = render(report).encode()
-        if max(len(encoded), len(page)) <= MAX_ARTIFACT:
+        if len(encoded) <= MAX_ARTIFACT:
             break
         report["source"]["limited"] = sorted(set(report["source"]["limited"] + ["artifact size limit"]))
         if not report["events"]:
@@ -212,7 +253,6 @@ def write_report(report, directory):
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "events.v1.json").write_bytes(encoded)
-    (directory / "report.html").write_bytes(page)
 
 
 def read_snapshot(path):
@@ -247,16 +287,31 @@ def hook():
         report = extract(data, os.environ.get(PREFIX + "INCLUDE_DETAILS") == "true", limited)
     except Exception:
         warn("log snapshot unavailable")
+    job = os.environ.get("BUILDKITE_JOB_ID", "")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", job):
+        job = ""
+    artifact_path = "osc7501/" + (job + "/" if job else "") + "events.v1.json"
+    artifact_uploaded = False
     try:
         with tempfile.TemporaryDirectory(prefix="osc7501-") as directory:
-            write_report(report, Path(directory) / "osc7501")
+            write_report(report, (Path(directory) / artifact_path).parent)
             if report["source"]["limited"]:
                 warn("snapshot extraction limited")
             # Use this step's existing agent job context, never a reporting step's token.
-            subprocess.run(["buildkite-agent", "artifact", "upload", "osc7501/*"], cwd=directory,
+            subprocess.run(["buildkite-agent", "artifact", "upload", artifact_path], cwd=directory,
                            check=True, timeout=15, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            artifact_uploaded = True
     except Exception:
         warn("report generation or artifact upload unavailable")
+    try:
+        if not job:
+            raise ValueError("job context unavailable")
+        subprocess.run(["buildkite-agent", "annotate", "--scope", "job", "--job", job,
+                        "--context", "osc7501-" + job, "--style", "info", "--append=false"],
+                       input=render(report, artifact_path if artifact_uploaded else None, job).encode(), check=True, timeout=15,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        warn("job annotation unavailable")
 
 
 def main():
@@ -272,7 +327,9 @@ def main():
         hook()
     else:
         data, limited = read_snapshot(args.input)
-        write_report(extract(data, args.include_details, limited), args.output)
+        report = extract(data, args.include_details, limited)
+        write_report(report, args.output)
+        (args.output / "annotation.html").write_text(render(report), encoding="utf-8")
 
 
 if __name__ == "__main__":

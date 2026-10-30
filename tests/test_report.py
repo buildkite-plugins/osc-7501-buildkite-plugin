@@ -1,5 +1,6 @@
 import base64
 import contextlib
+from html.parser import HTMLParser
 import importlib.util
 import io
 import json
@@ -18,8 +19,53 @@ report = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(report)
 
 
+AGENT_STAND_IN = '''#!/bin/bash
+printf 'DO_NOT_LOG_AGENT_PAYLOAD' >&2
+case "$1" in
+  artifact)
+    printf '%s\\n' "$*" > "$CAPTURE/upload-args"
+    find osc7501 -type f > "$CAPTURE/uploaded-files"
+    cp "$3" "$CAPTURE/"
+    exit "${UPLOAD_EXIT:-0}"
+    ;;
+  annotate)
+    printf '%s\\n' "$*" > "$CAPTURE/annotation-args"
+    cat > "$CAPTURE/annotation.html"
+    exit "${ANNOTATE_EXIT:-0}"
+    ;;
+  *) exit 99 ;;
+esac
+'''
+
+
 def osc(body, terminator=b"\x1b\\"):
     return b"\x1b]7501;" + body + terminator
+
+
+class HistoryRows(HTMLParser):
+    def __init__(self, page):
+        super().__init__()
+        self.rows = []
+        self.row = []
+        self.cell = None
+        self.feed(page)
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "tr":
+            self.row = []
+        elif tag == "td":
+            self.cell = []
+
+    def handle_data(self, data):
+        if self.cell is not None:
+            self.cell.append(data)
+
+    def handle_endtag(self, tag):
+        if tag == "td":
+            self.row.append(''.join(self.cell))
+            self.cell = None
+        elif tag == "tr" and self.row:
+            self.rows.append(self.row)
 
 
 class ReportTests(unittest.TestCase):
@@ -71,8 +117,16 @@ class ReportTests(unittest.TestCase):
         self.assertNotIn(b"WRONG DETAIL", encoded_files)
         self.assertIn(b"[REDACTED]", encoded_files)
         page = report.render(result)
+        tree, history = page.split('<details><summary>Chronological history', 1)
+        # Replacements discard live details, not the escaped historical record.
+        self.assertNotIn("&lt;script&gt;", tree)
+        self.assertIn("&lt;script&gt;", history)
+        self.assertNotIn(secret.decode(), page)
+        self.assertNotIn(encoded.decode(), page)
+        self.assertNotIn("WRONG DETAIL", page)
         self.assertNotIn("<script>", page)
-        self.assertIn("&lt;script&gt;", page)
+        self.assertIn('[REDACTED] <script>alert(1)</script>', HistoryRows(page).rows[0][3])
+        self.assertEqual(HistoryRows(page).rows[1][3], 'Details unavailable')
         self.assertNotIn("details", report.extract(data)["events"][0])
         self.assertNotIn("details", result["events"][1])
 
@@ -105,11 +159,20 @@ class ReportTests(unittest.TestCase):
         result = report.extract(b"".join(osc(b) for b in bodies))
         self.assertEqual(len(result["events"]), 6)
         page = report.render(result)
-        self.assertIn('test</code> <span class="state cleared">cleared', page)
-        self.assertIn('build</code> <span class="state working">working', page)
-        self.assertEqual(page.count('<tr id="event-'), 6)
+        self.assertIn('test</code> <strong>cleared</strong> · 1 reports · last before clear: done', page)
+        self.assertIn('build</code> <strong>working</strong> · 4 reports · app=new', page)
+        self.assertIn('6 chronological reports', page)
         # command and build are sibling roots, not a fabricated parent/child pair.
-        self.assertIn('command</p></details></li><li>', page)
+        self.assertIn('command</code> <strong>working</strong> · 1 reports</summary></details></li><li><details open>', page)
+        self.assertEqual(page.count('<details open>'), 3)
+        self.assertIn('<details><summary>Chronological history (6 of 6 reports)</summary>', page)
+        rows = HistoryRows(page).rows
+        self.assertEqual([row[:3] for row in rows], [
+            ['1', 'command', 'working'], ['2', 'build', 'working'], ['3', 'build', 'working'],
+            ['4', 'build/test', 'done'], ['5', 'build', 'clear'], ['6', 'build', 'working']])
+        self.assertTrue(rows[1][3].startswith('progress=10'))
+        self.assertTrue(rows[2][3].startswith('progress=10'))
+        self.assertEqual(rows[5][3], 'app=newDetails unavailable')
         self.assertNotIn("progress", result["events"][-1])
 
     def test_invalid_duplicate_fields_cannot_clear_valid_errors(self):
@@ -120,10 +183,10 @@ class ReportTests(unittest.TestCase):
                 result = report.extract(error + osc(b"state=clear:" + fields))
                 self.assertEqual(len(result["events"]), 1)
                 self.assertIn("unsupported or malformed OSC report", result["source"]["limited"])
-                self.assertIn('test</code> <span class="state error">error', report.render(result))
+                self.assertIn('test</code> <strong>error</strong>', report.render(result))
 
-    def test_serialized_size_bound_includes_html_escaping(self):
-        payload = osc(b"state=working:id=x") + b'# Program status: state=working id=x msg="' + b"<&" * 900 + b'"\n'
+    def test_serialized_json_size_bound(self):
+        payload = osc(b"state=working:id=x") + b'# Program status: state=working id=x msg="' + b"\xc3\xa9" * 900 + b'"\n'
         result = report.extract(payload * 1000, True)
         with tempfile.TemporaryDirectory() as directory:
             report.write_report(result, directory)
@@ -134,14 +197,43 @@ class ReportTests(unittest.TestCase):
         self.assertGreater(len(saved["events"]), 0)
         self.assertEqual([e["sequence"] for e in saved["events"]], list(range(1, len(saved["events"]) + 1)))
 
-    def test_local_cli_writes_two_self_contained_artifacts(self):
+    def test_annotation_display_limits_leave_json_history_intact(self):
+        data = b"".join(osc(b"state=blocked:id=build/test" + str(i).encode() + b":progress=37:kind=permission")
+                        + b'# Program status: state=blocked id=build/test' + str(i).encode()
+                        + b' kind=permission progress=37 msg="' + b"'" * 600 + b'"\n' for i in range(300))
+        result = report.extract(data, True)
+        with tempfile.TemporaryDirectory() as directory:
+            report.write_report(result, directory)
+            saved = json.loads((Path(directory) / "events.v1.json").read_text())
+        page = report.render(result, "osc7501/synthetic-job/events.v1.json")
+        self.assertLessEqual(len(page.encode()), report.MAX_ANNOTATION)
+        self.assertIn('kind=permission · progress=37', page)
+        self.assertIn('… (shortened)', page)
+        self.assertIn('Other programs are omitted', page)
+        self.assertEqual(page.count('<li>'), 100)
+        rows = HistoryRows(page).rows
+        self.assertGreater(len(rows), 0)
+        self.assertLess(len(rows), 300)
+        self.assertEqual([int(row[0]) for row in rows], list(range(1, len(rows) + 1)))
+        self.assertEqual(rows[-1][1], 'build/test' + str(len(rows) - 1))
+        self.assertIn('History limited to the first ' + str(len(rows)) + ' of 300 reports', page)
+        self.assertEqual(len(saved["events"]), 300)
+        self.assertEqual(saved["source"]["limited"], [])
+        self.assertEqual(len(saved["events"][-1]["details"]), 606)
+        self.assertIn('artifact://osc7501/synthetic-job/events.v1.json', page)
+        self.assertNotIn('artifact://', report.render(result))
+
+    def test_local_cli_writes_annotation_preview_and_json(self):
         with tempfile.TemporaryDirectory() as directory:
             subprocess.run(["python3", "-I", str(ROOT / "lib/report.py"), "local",
                             str(ROOT / "tests/fixtures/failed.raw"), directory, "--include-details"], check=True)
-            self.assertEqual(sorted(p.name for p in Path(directory).iterdir()), ["events.v1.json", "report.html"])
+            self.assertEqual(sorted(p.name for p in Path(directory).iterdir()), ["annotation.html", "events.v1.json"])
             self.assertEqual(json.loads((Path(directory) / "events.v1.json").read_text())["schema_version"], 1)
-            page = (Path(directory) / "report.html").read_text()
-            self.assertIn("default-src 'none'", page)
+            page = (Path(directory) / "annotation.html").read_text()
+            self.assertIn("OSC-7501 Events", page)
+            self.assertIn("JSON artifact not uploaded", page)
+            self.assertNotIn("<script", page)
+            self.assertNotIn("<style", page)
             self.assertNotIn("src=", page)
 
 
@@ -169,35 +261,45 @@ class LocalFileTests(unittest.TestCase):
 
 
 class HookTests(unittest.TestCase):
-    def test_hook_preserves_command_outcomes_when_log_or_upload_unavailable(self):
+    def test_hook_preserves_outcomes_when_log_upload_or_annotation_unavailable(self):
         with tempfile.TemporaryDirectory() as directory:
             agent = Path(directory) / "buildkite-agent"
-            agent.write_text('#!/bin/bash\nprintf "%s\\n" "$*" > "$CAPTURE/args"\ncp osc7501/* "$CAPTURE/"\nprintf "DO_NOT_LOG_AGENT_PAYLOAD" >&2\nexit "${UPLOAD_EXIT:-0}"\n')
+            agent.write_text(AGENT_STAND_IN)
             agent.chmod(0o755)
-            env = {"PATH": directory + os.pathsep + os.defpath + ":/usr/local/bin", "CAPTURE": directory}
+            env = {"PATH": directory + os.pathsep + os.defpath + ":/usr/local/bin", "CAPTURE": directory,
+                   "BUILDKITE_JOB_ID": "synthetic-job"}
             for status in ("0", "7"):
-                for upload_exit in ("0", "9"):
-                    env["UPLOAD_EXIT"] = upload_exit
+                for upload_exit, annotate_exit in (("0", "0"), ("0", "9"), ("9", "0"), ("9", "9")):
+                    env.update(UPLOAD_EXIT=upload_exit, ANNOTATE_EXIT=annotate_exit)
                     result = subprocess.run(["bash", "-c", 'bash -c "exit $1"; export BUILDKITE_COMMAND_EXIT_STATUS=$?; "$2"; hook_status=$?; test "$hook_status" = 0 || exit 99; exit "$BUILDKITE_COMMAND_EXIT_STATUS"',
                                              "test", status, str(ROOT / "hooks/post-command")], env=env, capture_output=True)
                     self.assertEqual(result.returncode, int(status))
                     self.assertIn(b"log snapshot unavailable", result.stdout)
                     self.assertNotIn(b"DO_NOT_LOG_AGENT_PAYLOAD", result.stdout + result.stderr)
-                    self.assertEqual((Path(directory) / "args").read_text().strip(), "artifact upload osc7501/*")
+                    self.assertEqual((Path(directory) / "upload-args").read_text().strip(),
+                                     "artifact upload osc7501/synthetic-job/events.v1.json")
                     saved = json.loads((Path(directory) / "events.v1.json").read_text())
                     self.assertEqual(saved["source"]["availability"], "unavailable")
+                    page = (Path(directory) / "annotation.html").read_text()
+                    self.assertIn("Log snapshot unavailable", page)
+                    self.assertIn('href="?jid=synthetic-job&amp;tab=output#synthetic-job">Open job log</a>', page)
+                    self.assertEqual("artifact://" in page, upload_exit == "0")
+                    self.assertEqual(b"job annotation unavailable" in result.stdout, annotate_exit != "0")
                     if upload_exit != "0":
                         self.assertIn(b"artifact upload unavailable", result.stdout)
 
     def test_local_file_to_artifact_upload_with_default_options(self):
         with tempfile.TemporaryDirectory() as directory:
             agent = Path(directory) / "buildkite-agent"
-            agent.write_text('#!/bin/bash\nprintf "%s\\n" "$*" > "$CAPTURE/args"\ncp osc7501/* "$CAPTURE/"\n')
+            agent.write_text(AGENT_STAND_IN)
             agent.chmod(0o755)
-            env = {"PATH": directory + os.pathsep + os.defpath + ":/usr/local/bin", "CAPTURE": directory}
+            env = {"PATH": directory + os.pathsep + os.defpath + ":/usr/local/bin", "CAPTURE": directory,
+                   "BUILDKITE_JOB_ID": "synthetic-job"}
             for scenario, count, status in (("failed", 13, 7), ("successful", 13, 0),
                                             ("blocked", 15, 0), ("experiment-off", 0, 0)):
                 with self.subTest(scenario=scenario):
+                    env["BUILDKITE_JOB_ID"] = "synthetic-" + scenario
+                    artifact_path = "osc7501/synthetic-" + scenario + "/events.v1.json"
                     env["BUILDKITE_JOB_LOG_TMPFILE"] = str(ROOT / "tests/fixtures" / (scenario + ".raw"))
                     # Run an actual command, then the optional hook, preserving its result.
                     result = subprocess.run(["bash", "-c", 'bash -c "exit $1"; export BUILDKITE_COMMAND_EXIT_STATUS=$?; "$2"; exit "$BUILDKITE_COMMAND_EXIT_STATUS"',
@@ -207,10 +309,21 @@ class HookTests(unittest.TestCase):
                     saved = json.loads((Path(directory) / "events.v1.json").read_text())
                     self.assertEqual(saved["source"]["availability"], "available")
                     self.assertEqual(len(saved["events"]), count)
-                    self.assertEqual((Path(directory) / "args").read_text().strip(), "artifact upload osc7501/*")
+                    self.assertEqual((Path(directory) / "uploaded-files").read_text().splitlines(),
+                                     [artifact_path])
+                    self.assertEqual((Path(directory) / "annotation-args").read_text().strip(),
+                                     "annotate --scope job --job synthetic-" + scenario
+                                     + " --context osc7501-synthetic-" + scenario + " --style info --append=false")
+                    page = (Path(directory) / "annotation.html").read_text()
+                    self.assertIn("artifact://" + artifact_path, page)
+                    self.assertIn('href="?jid=synthetic-' + scenario + '&amp;tab=output#synthetic-'
+                                  + scenario + '">Open job log</a>', page)
+                    self.assertNotIn('/L', page)
                     self.assertTrue(all("details" not in e for e in saved["events"]))
                     if count:
                         self.assertEqual([e["state"] for e in saved["events"]][-2:], ["clear", "clear"])
+                        self.assertEqual([row[2] for row in HistoryRows(page).rows],
+                                         [e["state"] for e in saved["events"]])
                     else:
                         self.assertEqual(saved["source"]["event_support"], "unknown")
             env[report.PREFIX + "INCLUDE_DETAILS"] = "true"
@@ -220,12 +333,13 @@ class HookTests(unittest.TestCase):
             self.assertEqual(len(saved["events"]), 13)
             self.assertIn("Compiling", next(e["details"] for e in saved["events"] if "details" in e))
 
-    def test_parse_failure_and_upload_timeout_are_fail_open(self):
+    def test_parse_failure_and_delivery_timeouts_are_fail_open(self):
         with tempfile.TemporaryDirectory() as directory:
             agent = Path(directory) / "buildkite-agent"
-            agent.write_text('#!/bin/bash\ncp osc7501/* "$CAPTURE/"\n')
+            agent.write_text(AGENT_STAND_IN)
             agent.chmod(0o755)
             env = {"PATH": directory + os.pathsep + os.defpath, "CAPTURE": directory,
+                   "BUILDKITE_JOB_ID": "synthetic-job",
                    "BUILDKITE_JOB_LOG_TMPFILE": str(ROOT / "tests/fixtures/failed.raw")}
             for status in ("0", "7"):
                 env["BUILDKITE_COMMAND_EXIT_STATUS"] = status
@@ -245,7 +359,17 @@ class HookTests(unittest.TestCase):
                         with contextlib.redirect_stdout(io.StringIO()) as output:
                             report.hook()
                         self.assertIn("artifact upload unavailable", output.getvalue())
+                        self.assertIn("job annotation unavailable", output.getvalue())
                     self.assertEqual(os.environ["BUILDKITE_COMMAND_EXIT_STATUS"], status)
+            # Never fall back to a build-scoped annotation without a job context.
+            (Path(directory) / "annotation-args").unlink()
+            for invalid_job in ("", "../outside", "a" * 65):
+                env["BUILDKITE_JOB_ID"] = invalid_job
+                with patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(io.StringIO()) as output:
+                    report.hook()
+                self.assertIn("job annotation unavailable", output.getvalue())
+                self.assertFalse((Path(directory) / "annotation-args").exists())
+                self.assertEqual((Path(directory) / "uploaded-files").read_text().strip(), "osc7501/events.v1.json")
 
 
 if __name__ == "__main__":

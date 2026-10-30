@@ -1,5 +1,5 @@
 name: OSC 7501
-description: Partial program-event HTML and JSON artifacts from the agent's local log file
+description: Job-level program-event annotation and chronological JSON from the agent's local log file
 author: https://github.com/mcncl
 requirements:
   - bash
