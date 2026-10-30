@@ -22,7 +22,7 @@ The hook needs access to `BUILDKITE_JOB_LOG_TMPFILE`, including across container
 steps:
   - command: ./run-tests
     plugins:
-      - mcncl/osc-7501#v1.2.0: ~
+      - osc-7501#v1.2.0: ~
 ```
 
 ### Configuration
