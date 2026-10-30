@@ -23,16 +23,16 @@ The hook must be able to read `BUILDKITE_JOB_LOG_TMPFILE`, including across cont
 
 The plugin does not enable experiments or instrument commands.
 
-Add the plugin to your step. No release is published yet; replace `COMMIT_SHA` with a reviewed commit before use:
+Add the plugin to your step:
 
 ```yaml
 steps:
   - command: ./run-tests
     plugins:
-      - mcncl/osc-7501#COMMIT_SHA: {}
+      - mcncl/osc-7501#v1.0.0: ~
 ```
 
-Adding the plugin enables reporting. Remove it from the step to stop generating reports.
+Adding the plugin enables reporting on that step. Remove it from the step to stop generating reports.
 
 ## Options
 
