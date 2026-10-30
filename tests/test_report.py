@@ -163,7 +163,7 @@ class ReportTests(unittest.TestCase):
         self.assertIn('build</code> <strong>working</strong> · 4 reports · app=new', page)
         self.assertIn('6 chronological reports', page)
         # command and build are sibling roots, not a fabricated parent/child pair.
-        self.assertIn('command</code> <strong>working</strong> · 1 reports</summary></details></li><li><details open>', page)
+        self.assertIn('</details></li><li><details open><summary><code>build</code>', page)
         self.assertEqual(page.count('<details open>'), 3)
         self.assertIn('<details><summary>Chronological history (6 of 6 reports)</summary>', page)
         rows = HistoryRows(page).rows
@@ -174,6 +174,37 @@ class ReportTests(unittest.TestCase):
         self.assertTrue(rows[2][3].startswith('progress=10'))
         self.assertEqual(rows[5][3], 'app=newDetails unavailable')
         self.assertNotIn("progress", result["events"][-1])
+
+    def test_metadata_only_groups_show_their_own_recent_reports(self):
+        bodies = [b"state=working:id=command", b"state=done:id=checkout",
+                  b"state=working:id=command:progress=20", b"state=working:id=command:progress=40",
+                  b"state=working:id=command:progress=60", b"state=working:id=command:progress=80",
+                  b"state=error:id=command", b"state=error"]
+        result = report.extract(b"\n".join(osc(b) for b in bodies))
+        page = report.render(result)
+        command = page.split('<code>command</code>', 1)[1].split('</details>', 1)[0]
+        self.assertIn('Readable details unavailable', command)
+        self.assertIn('Showing the last 5 of 6 reports', command)
+        self.assertIn('Report #3 · working · progress=20 · snapshot line 3', command)
+        self.assertIn('Report #7 · error · snapshot line 7', command)
+        self.assertEqual(command.count('<li>Report #'), 5)
+        for sequence in (1, 2, 8):
+            self.assertNotIn('Report #' + str(sequence) + ' ·', command)
+        root = page.split('<code>(root record)</code>', 1)[1].split('</details>', 1)[0]
+        self.assertIn('Report #8 · error · snapshot line 8', root)
+        self.assertEqual(len(result['events']), 8)
+        self.assertEqual([int(row[0]) for row in HistoryRows(page).rows], list(range(1, 9)))
+
+    def test_group_with_no_visible_content_has_no_disclosure(self):
+        bodies = [b'state=done:id=program' + str(i).encode() for i in range(99)]
+        bodies.append(b'state=error:id=branch/leaf')
+        result = report.extract(b''.join(osc(body) for body in bodies))
+        page = report.render(result)
+        self.assertIn('<li><code>branch</code> <strong>group</strong></li>', page)
+        self.assertNotIn('<summary><code>branch</code>', page)
+        self.assertNotIn('<ul></ul>', page)
+        self.assertIn('Other programs are omitted', page)
+        self.assertEqual(HistoryRows(page).rows[-1][1:3], ['branch/leaf', 'error'])
 
     def test_invalid_duplicate_fields_cannot_clear_valid_errors(self):
         error = osc(b"state=error:id=build/test")
@@ -210,7 +241,7 @@ class ReportTests(unittest.TestCase):
         self.assertIn('kind=permission · progress=37', page)
         self.assertIn('… (shortened)', page)
         self.assertIn('Other programs are omitted', page)
-        self.assertEqual(page.count('<li>'), 100)
+        self.assertEqual(page.count('<li><details open>'), 100)
         rows = HistoryRows(page).rows
         self.assertGreater(len(rows), 0)
         self.assertLess(len(rows), 300)

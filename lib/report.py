@@ -18,6 +18,7 @@ MAX_FIELDS = 24
 MAX_EVENTS = 1000
 MAX_ARTIFACT = 2 * 1024 * 1024
 MAX_TREE_NODES = 100
+MAX_NODE_REPORTS = 5
 MAX_ANNOTATION = 256 * 1024
 STATES = {"idle", "working", "blocked", "done", "error", "clear"}
 SEGMENT = re.compile(r"[A-Za-z0-9_.+-]{1,32}\Z")
@@ -168,7 +169,7 @@ def render(report, artifact_path=None, job=None):
 
     def tree(branch, path=""):
         nonlocal shown, omitted
-        result = "<ul>"
+        result = ""
         for name, node in branch.items():
             if shown == MAX_TREE_NODES:
                 omitted = True
@@ -179,25 +180,42 @@ def render(report, artifact_path=None, job=None):
             current = live.get(key)
             own = node["events"]
             label = current["state"] if current else ("cleared" if own else "group")
-            result += '<li><details open><summary><code>' + escape(name) + '</code> <strong>' + label + '</strong>'
+            summary = '<code>' + escape(name) + '</code> <strong>' + label + '</strong>'
             if own:
-                result += ' · ' + str(len(own)) + ' reports'
+                summary += ' · ' + str(len(own)) + ' reports'
                 if current is None:
                     previous = next((e for e in reversed(own) if e["state"] != "clear"), None)
                     if previous:
-                        result += ' · last before clear: ' + previous["state"]
+                        summary += ' · last before clear: ' + previous["state"]
             if current:
                 for field in ("app", "kind", "progress"):
                     if field in current:
-                        result += ' · ' + field + '=' + escape(current[field])
-            result += '</summary>'
+                        summary += ' · ' + field + '=' + escape(current[field])
+            body = ''
             if current and current.get("details"):
                 detail = current["details"]
-                result += '<p>' + escape(detail[:200]) + ('… (shortened)' if len(detail) > 200 else '') + '</p>'
+                body += '<p>' + escape(detail[:200]) + ('… (shortened)' if len(detail) > 200 else '') + '</p>'
+            elif current:
+                body += '<p>Readable details unavailable for the latest report.</p>'
+            if own:
+                if len(own) > MAX_NODE_REPORTS:
+                    body += '<p>Showing the last ' + str(MAX_NODE_REPORTS) + ' of ' + str(len(own)) + ' reports for this program. See chronological history or JSON for earlier reports.</p>'
+                body += '<ol>'
+                for event in own[-MAX_NODE_REPORTS:]:
+                    body += '<li>Report #' + str(event["sequence"]) + ' · ' + escape(event["state"])
+                    if "progress" in event:
+                        body += ' · progress=' + str(event["progress"])
+                    body += ' · snapshot line ' + str(event["snapshot_line"]) + '</li>'
+                body += '</ol>'
             if node["children"]:
-                result += tree(node["children"], identifier)
-            result += "</details></li>"
-        return result + "</ul>"
+                body += tree(node["children"], identifier)
+            result += '<li>'
+            if body:
+                result += '<details open><summary>' + summary + '</summary>' + body + '</details>'
+            else:
+                result += summary
+            result += '</li>'
+        return '<ul>' + result + '</ul>' if result else ''
 
     if not events:
         message = "Log snapshot unavailable. No event history can be determined." if source["availability"] == "unavailable" else "No supported events observed. Experiment support is unknown; this is not evidence of success."

@@ -44,7 +44,7 @@ Adding the plugin enables reporting on that step. Remove it from the step to sto
 
 Read **OSC-7501 Events** on the job. **Open job log** switches to that job's output tab, without targeting a specific line. The annotation also links to chronological JSON when its artifact upload succeeds. No HTML artifact is uploaded.
 
-The tree groups by `/` in program IDs. Each group can be collapsed and starts expanded. Tools are not implicitly children of the command. The annotation shows latest observed states and report counts, including cleared records and their last state before clear.
+The tree groups by `/` in program IDs. Groups with visible content start expanded and can be collapsed; empty groups have no disclosure arrow. Expand a program to see its five most recent reports, including states, progress where present, and snapshot-local line positions. Missing readable details are labelled explicitly. Tools are not implicitly children of the command. The annotation shows latest observed states and report counts, including cleared records and their last state before clear.
 
 Open the separate **Chronological history** section to see reports in snapshot order, including successful hooks, repeats, progress, and clear reports. Clear removes live records and descendants, not history. This section starts collapsed.
 
