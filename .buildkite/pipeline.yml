@@ -1,0 +1,21 @@
+env:
+  BUILDKITE_PLUGINS_ALWAYS_CLONE_FRESH: "true"
+
+steps:
+  - label: ":python: Tests"
+    command: python3 -m unittest discover -s tests -v
+    plugins:
+      - docker#v5.14.0:
+          image: python:3.14.10-slim-bookworm
+          mount-buildkite-agent: false
+
+  - label: ":sparkles: Lint"
+    plugins:
+      - plugin-linter#v4.1.0:
+          id: mcncl/osc-7501
+
+  - label: ":shell: Shellcheck"
+    plugins:
+      - shellcheck#v1.4.0:
+          files:
+            - hooks/post-command
