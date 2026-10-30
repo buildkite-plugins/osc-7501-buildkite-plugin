@@ -25,9 +25,14 @@ steps:
       - mcncl/osc-7501#v1.2.0: ~
 ```
 
-`include-details` defaults to `false`. Enable it to copy adjacent, matching, already-redacted readable descriptions.
+### Configuration
 
-Reports are partial, not job status; reporting failures leave the command's exit status unchanged. Adding the plugin copies log-derived data into annotations and artifacts with separate access and retention. Removing it does not delete existing copies. Artifact contents are not automatically redacted; unregistered secrets can remain.
+`include-details`, default: `false`
+
+Enable it to copy adjacent, matching, already-redacted readable descriptions.
+
+[!WARNING]
+> Reports are partial, not job status; reporting failures leave the command's exit status unchanged. Adding the plugin copies log-derived data into annotations and artifacts with separate access and retention. Removing it does not delete existing copies. Artifact contents are not automatically redacted; unregistered secrets can remain.
 
 ## Development
 
