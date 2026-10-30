@@ -1,6 +1,6 @@
 # OSC-7501 Buildkite plugin
 
-Show a step's OSC 7501 program reports in a job-level **OSC-7501 Events** annotation and upload chronological JSON to `osc7501/<job-id>/events.v1.json` (schema version 1).
+Show a step's OSC 7501 program reports in a job-level **OSC-7501 Events** annotation and upload chronological JSON to `osc7501/<job-id>/events.v1.json`.
 
 Reads the agent's local log in `post-command`. No command wrapping or REST API token required.
 
